@@ -78,7 +78,8 @@ async function getNews() {
     { title: "SBOM becomes standard", link: "https://www.cisa.gov/sbom" }
   ];
 
-  const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
+  // ✅ შესწორებული მოდელის სახელი (არსებული ვერსია)
+  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
   
   const formatNewsWithLinks = (newsArray) => {
     return newsArray.map(item => `• ${item.title}\n  🔗 ${item.link}`).join('\n');
