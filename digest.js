@@ -1,39 +1,56 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const fs = require('fs');
+name: AI Daily Digest
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'
 
-async function getNews() {
-  try {
-    console.log('Starting digest generation...');
-    
-    // ... თქვენი არსებული კოდი (aiMlNews, dotnetNews, prompt, etc.) ...
-    
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-    
-    const prompt = `Translate these tech news to Georgian and add practical hints...`; // თქვენი prompt
-    
-    console.log('Calling Gemini API...');
-    const result = await model.generateContent(prompt);
-    const output = result.response.text();
-    
-    console.log('API response received, length:', output.length);
-    
-    // ✅ ფაილის შექმნა
-    fs.writeFileSync('digest-output.txt', output);
-    console.log('✅ digest-output.txt created successfully');
-    
-    // აჩვენე პირველი 500 სიმბოლო
-    console.log('First 500 chars:', output.substring(0, 500));
-    
-  } catch (error) {
-    console.error('❌ Error in getNews:', error.message);
-    if (error.stack) console.error(error.stack);
-    
-    // შექმენი შეცდომის ფაილი რომ Issue არ გაფუჭდეს
-    fs.writeFileSync('digest-output.txt', `Error: ${error.message}\n\nCheck GitHub Actions logs for details.`);
-    throw error;
-  }
-}
-
-getNews().catch(console.error);
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies
+        run: npm install @google/generative-ai
+      
+      - name: Generate and send to Discord
+        run: |
+          OUTPUT=$(node -e '
+            const { GoogleGenerativeAI } = require("@google/generative-ai");
+            const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+            
+            const aiMlNews = [
+              { title: "GitHub Copilot launches new agent mode", link: "https://github.blog/news/copilot-agent-mode-2026/" },
+              { title: "Google releases Gemini 2.5 Pro", link: "https://developers.googleblog.com/gemini-2-5-pro/" },
+              { title: "OpenAI GPT-5 with reasoning", link: "https://openai.com/blog/gpt-5" }
+            ];
+            
+            const formatNews = (items) => items.map(i => `• ${i.title}\n  🔗 ${i.link}`).join("\n");
+            
+            const prompt = `Translate to Georgian, keep links, add short hints:\n=== AI/ML ===\n${formatNews(aiMlNews)}`;
+            
+            (async () => {
+              const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+              const result = await model.generateContent(prompt);
+              console.log(result.response.text());
+            })();
+          ')
+          
+          ESCAPED=$(echo "$OUTPUT" | head -c 1900 | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+          
+          curl -X POST -H "Content-Type: application/json" \
+            -d "{
+              \"content\": \"📰 **AI ყოველდღიური სიახლეები**\",
+              \"embeds\": [{
+                \"title\": \"$(date +'%Y-%m-%d')\",
+                \"description\": \"$ESCAPED\",
+                \"color\": 5814783
+              }]
+            }" "${{ secrets.DISCORD_WEBHOOK_URL }}"
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
