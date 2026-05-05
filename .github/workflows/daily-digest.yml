@@ -19,3 +19,15 @@ jobs:
         run: node digest.js
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      - name: Create Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const content = fs.readFileSync('digest-output.txt', 'utf8');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `📰 AI სიახლეები - ${new Date().toLocaleDateString('ka-GE')}`,
+              body: content
+            });
