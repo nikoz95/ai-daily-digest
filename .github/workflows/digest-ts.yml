@@ -1,7 +1,7 @@
 name: AI Daily Digest (TypeScript)
 
 on:
-  workflow_dispatch:                                    # ხელით გაშვება
+  workflow_dispatch:
     inputs:
       hours:
         description: 'საათები (24/48/72)'
@@ -19,10 +19,10 @@ on:
           - ka
         default: ka
   schedule:
-    - cron: '0 6 * * *'                                 # ყოველ დილას 06:00 UTC
+    - cron: '0 6 * * *'
 
 permissions:
-  issues: write                                          # Issue-ს შესაქმნელად
+  issues: write
   contents: read
 
 jobs:
@@ -67,7 +67,7 @@ jobs:
               return;
             }
             
-            const content = fs.readFileSync(path, 'utf8');
+            let content = fs.readFileSync(path, 'utf8');
             const date = new Date().toLocaleDateString('ka-GE');
             
             await github.rest.issues.create({
