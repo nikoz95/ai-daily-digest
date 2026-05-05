@@ -628,13 +628,13 @@ async function scoreArticlesWithAI(
 
 function buildSummaryPrompt(
   articles: Array<{ index: number; title: string; description: string; sourceName: string; link: string }>,
-  lang: 'zh' | 'en'
+  lang: 'ka' | 'en'
 ): string {
   const articlesList = articles.map(a =>
     `Index ${a.index}: [${a.sourceName}] ${a.title}\nURL: ${a.link}\n${a.description.slice(0, 800)}`
   ).join('\n\n---\n\n');
 
-  const langInstruction = lang === 'zh'
+  const langInstruction = lang === 'ka'
     ? '请用中文撰写摘要和推荐理由。如果原文是英文，请翻译为中文。标题翻译也用中文。'
     : 'Write summaries, reasons, and title translations in English.';
 
@@ -676,7 +676,7 @@ ${articlesList}
 async function summarizeArticles(
   articles: Array<Article & { index: number }>,
   aiClient: AIClient,
-  lang: 'zh' | 'en'
+  lang: 'ka' | 'en'
 ): Promise<Map<number, { titleZh: string; summary: string; reason: string }>> {
   const summaries = new Map<number, { titleZh: string; summary: string; reason: string }>();
   
@@ -734,13 +734,13 @@ async function summarizeArticles(
 async function generateHighlights(
   articles: ScoredArticle[],
   aiClient: AIClient,
-  lang: 'zh' | 'en'
+  lang: 'ka' | 'en'
 ): Promise<string> {
   const articleList = articles.slice(0, 10).map((a, i) =>
     `${i + 1}. [${a.category}] ${a.titleZh || a.title} — ${a.summary.slice(0, 100)}`
   ).join('\n');
 
-  const langNote = lang === 'zh' ? '用中文回答。' : 'Write in English.';
+  const langNote = lang === 'ka' ? 'ჩაწერე。' : 'Write in English.';
 
   const prompt = `根据以下今日精选技术文章列表，写一段 3-5 句话的"今日看点"总结。
 要求：
@@ -1007,7 +1007,7 @@ Usage:
 Options:
   --hours <n>     Time range in hours (default: 48)
   --top-n <n>     Number of top articles to include (default: 15)
-  --lang <lang>   Summary language: zh or en (default: zh)
+  --lang <lang>   Summary language: ka or en (default: ka)
   --output <path> Output file path (default: ./digest-YYYYMMDD.md)
   --help          Show this help
 
@@ -1018,7 +1018,7 @@ Environment:
   OPENAI_MODEL     Optional fallback model (default: deepseek-chat for DeepSeek base, else gpt-4o-mini)
 
 Examples:
-  bun scripts/digest.ts --hours 24 --top-n 10 --lang zh
+  bun scripts/digest.ts --hours 24 --top-n 10 --lang ka
   bun scripts/digest.ts --hours 72 --top-n 20 --lang en --output ./my-digest.md
 `);
   process.exit(0);
@@ -1030,7 +1030,7 @@ async function main(): Promise<void> {
   
   let hours = 48;
   let topN = 15;
-  let lang: 'zh' | 'en' = 'zh';
+  let lang: 'ka' | 'en' = 'ka';
   let outputPath = '';
   
   for (let i = 0; i < args.length; i++) {
