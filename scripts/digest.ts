@@ -1,5 +1,4 @@
-import { writeFile, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { writeFile } from 'node:fs/promises';
 import process from 'node:process';
 
 // ============================================================================
@@ -11,11 +10,10 @@ const OPENAI_DEFAULT_API_BASE = 'https://api.openai.com/v1';
 const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini';
 const FEED_FETCH_TIMEOUT_MS = 15_000;
 const FEED_CONCURRENCY = 10;
-const GEMINI_BATCH_SIZE = 10;
-const MAX_CONCURRENT_GEMINI = 2;
 
-// 92 RSS feeds from Hacker News Popularity Contest 2025 (curated by Karpathy)
+// 92 RSS feeds (original list + .NET + DEV.to)
 const RSS_FEEDS: Array<{ name: string; xmlUrl: string; htmlUrl: string }> = [
+  // Original Karpathy feeds
   { name: "simonwillison.net", xmlUrl: "https://simonwillison.net/atom/everything/", htmlUrl: "https://simonwillison.net" },
   { name: "jeffgeerling.com", xmlUrl: "https://www.jeffgeerling.com/blog.xml", htmlUrl: "https://jeffgeerling.com" },
   { name: "seangoedecke.com", xmlUrl: "https://www.seangoedecke.com/rss.xml", htmlUrl: "https://seangoedecke.com" },
@@ -91,7 +89,6 @@ const RSS_FEEDS: Array<{ name: string; xmlUrl: string; htmlUrl: string }> = [
   { name: "steveblank.com", xmlUrl: "https://steveblank.com/feed/", htmlUrl: "https://steveblank.com" },
   { name: "bernsteinbear.com", xmlUrl: "https://bernsteinbear.com/feed.xml", htmlUrl: "https://bernsteinbear.com" },
   { name: "danieldelaney.net", xmlUrl: "https://danieldelaney.net/feed", htmlUrl: "https://danieldelaney.net" },
-  { name: "troyhunt.com", xmlUrl: "https://www.troyhunt.com/rss/", htmlUrl: "https://troyhunt.com" },
   { name: "herman.bearblog.dev", xmlUrl: "https://herman.bearblog.dev/feed/", htmlUrl: "https://herman.bearblog.dev" },
   { name: "tomrenner.com", xmlUrl: "https://tomrenner.com/index.xml", htmlUrl: "https://tomrenner.com" },
   { name: "blog.pixelmelt.dev", xmlUrl: "https://blog.pixelmelt.dev/rss/", htmlUrl: "https://blog.pixelmelt.dev" },
@@ -105,75 +102,18 @@ const RSS_FEEDS: Array<{ name: string; xmlUrl: string; htmlUrl: string }> = [
   { name: "michael.stapelberg.ch", xmlUrl: "https://michael.stapelberg.ch/feed.xml", htmlUrl: "https://michael.stapelberg.ch" },
   { name: "miguelgrinberg.com", xmlUrl: "https://blog.miguelgrinberg.com/feed", htmlUrl: "https://miguelgrinberg.com" },
   { name: "keygen.sh", xmlUrl: "https://keygen.sh/blog/feed.xml", htmlUrl: "https://keygen.sh" },
-  { name: "mjg59.dreamwidth.org", xmlUrl: "https://mjg59.dreamwidth.org/data/rss", htmlUrl: "https://mjg59.dreamwidth.org" },
   { name: "computer.rip", xmlUrl: "https://computer.rip/rss.xml", htmlUrl: "https://computer.rip" },
   { name: "tedunangst.com", xmlUrl: "https://www.tedunangst.com/flak/rss", htmlUrl: "https://tedunangst.com" },
+  
+  // 🆕 NEW FEEDS (DEV.to + .NET Ecosystem)
+  { name: "DEV.to", xmlUrl: "https://dev.to/feed", htmlUrl: "https://dev.to" },
+  { name: ".NET Blog", xmlUrl: "https://devblogs.microsoft.com/dotnet/feed/", htmlUrl: "https://devblogs.microsoft.com/dotnet" },
+  { name: "ASP.NET Core", xmlUrl: "https://devblogs.microsoft.com/aspnet/feed/", htmlUrl: "https://devblogs.microsoft.com/aspnet" },
+  { name: "Visual Studio / C#", xmlUrl: "https://devblogs.microsoft.com/visualstudio/feed/", htmlUrl: "https://devblogs.microsoft.com/visualstudio" },
 ];
 
 // ============================================================================
-// Types
-// ============================================================================
-
-type CategoryId = 'ai-ml' | 'security' | 'engineering' | 'tools' | 'opinion' | 'other';
-
-const CATEGORY_META: Record<CategoryId, { emoji: string; label: string }> = {
-  'ai-ml':       { emoji: '🤖', label: 'AI / ML' },
-  'security':    { emoji: '🔒', label: 'Security' },
-  'engineering': { emoji: '⚙️', label: 'Engineering' },
-  'tools':       { emoji: '🛠', label: 'Tools' },
-  'opinion':     { emoji: '💡', label: 'Opinion' },
-  'other':       { emoji: '📝', label: 'Other' },
-};
-
-interface Article {
-  title: string;
-  link: string;
-  pubDate: Date;
-  description: string;
-  sourceName: string;
-  sourceUrl: string;
-}
-
-interface ScoredArticle extends Article {
-  score: number;
-  scoreBreakdown: {
-    relevance: number;
-    quality: number;
-    timeliness: number;
-  };
-  category: CategoryId;
-  keywords: string[];
-  titleTranslated: string;
-  summary: string;
-  reason: string;
-}
-
-interface GeminiScoringResult {
-  results: Array<{
-    index: number;
-    relevance: number;
-    quality: number;
-    timeliness: number;
-    category: string;
-    keywords: string[];
-  }>;
-}
-
-interface GeminiSummaryResult {
-  results: Array<{
-    index: number;
-    titleTranslated: string;
-    summary: string;
-    reason: string;
-  }>;
-}
-
-interface AIClient {
-  call(prompt: string): Promise<string>;
-}
-
-// ============================================================================
-// RSS/Atom Parsing
+// RSS Parsing
 // ============================================================================
 
 function stripHtml(html: string): string {
@@ -186,7 +126,8 @@ function stripHtml(html: string): string {
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ')
     .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code)))
-    .trim();
+    .trim()
+    .slice(0, 500);
 }
 
 function extractCDATA(text: string): string {
@@ -199,12 +140,9 @@ function getTagContent(xml: string, tagName: string): string {
     new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)</${tagName}>`, 'i'),
     new RegExp(`<${tagName}[^>]*/>`, 'i'),
   ];
-  
   for (const pattern of patterns) {
     const match = xml.match(pattern);
-    if (match?.[1]) {
-      return extractCDATA(match[1]).trim();
-    }
+    if (match?.[1]) return extractCDATA(match[1]).trim();
   }
   return '';
 }
@@ -215,17 +153,15 @@ function getAttrValue(xml: string, tagName: string, attrName: string): string {
   return match?.[1] || '';
 }
 
-function parseDate(dateStr: string): Date | null {
-  if (!dateStr) return null;
+function parseDate(dateStr: string): Date {
   const d = new Date(dateStr);
-  if (!isNaN(d.getTime())) return d;
-  return null;
+  return isNaN(d.getTime()) ? new Date() : d;
 }
 
 function parseRSSItems(xml: string): Array<{ title: string; link: string; pubDate: string; description: string }> {
   const items: Array<{ title: string; link: string; pubDate: string; description: string }> = [];
   
-  const isAtom = xml.includes('<feed') && (xml.includes('xmlns="http://www.w3.org/2005/Atom"') || xml.includes('<feed '));
+  const isAtom = xml.includes('<feed') && xml.includes('xmlns="http://www.w3.org/2005/Atom"');
   
   if (isAtom) {
     const entryPattern = /<entry[\s>]([\s\S]*?)<\/entry>/gi;
@@ -237,9 +173,7 @@ function parseRSSItems(xml: string): Array<{ title: string; link: string; pubDat
       if (!link) link = getAttrValue(entryXml, 'link', 'href');
       const pubDate = getTagContent(entryXml, 'published') || getTagContent(entryXml, 'updated');
       const description = stripHtml(getTagContent(entryXml, 'summary') || getTagContent(entryXml, 'content'));
-      if (title || link) {
-        items.push({ title, link, pubDate, description: description.slice(0, 500) });
-      }
+      if (title || link) items.push({ title, link, pubDate, description });
     }
   } else {
     const itemPattern = /<item[\s>]([\s\S]*?)<\/item>/gi;
@@ -250,573 +184,111 @@ function parseRSSItems(xml: string): Array<{ title: string; link: string; pubDat
       const link = getTagContent(itemXml, 'link') || getTagContent(itemXml, 'guid');
       const pubDate = getTagContent(itemXml, 'pubDate') || getTagContent(itemXml, 'dc:date') || getTagContent(itemXml, 'date');
       const description = stripHtml(getTagContent(itemXml, 'description') || getTagContent(itemXml, 'content:encoded'));
-      if (title || link) {
-        items.push({ title, link, pubDate, description: description.slice(0, 500) });
-      }
+      if (title && link) items.push({ title, link, pubDate, description });
     }
   }
   return items;
 }
 
-// ============================================================================
-// Feed Fetching
-// ============================================================================
-
-async function fetchFeed(feed: { name: string; xmlUrl: string; htmlUrl: string }): Promise<Article[]> {
+async function fetchFeed(feed: { name: string; xmlUrl: string }): Promise<Array<{ title: string; link: string; sourceName: string; description: string }>> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FEED_FETCH_TIMEOUT_MS);
-    
-    const response = await fetch(feed.xmlUrl, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'AI-Daily-Digest/1.0 (RSS Reader)',
-        'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
-      },
-    });
-    
+    const response = await fetch(feed.xmlUrl, { signal: controller.signal });
     clearTimeout(timeout);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    
+    if (!response.ok) return [];
     const xml = await response.text();
     const items = parseRSSItems(xml);
-    
     return items.map(item => ({
       title: item.title,
       link: item.link,
-      pubDate: parseDate(item.pubDate) || new Date(0),
-      description: item.description,
       sourceName: feed.name,
-      sourceUrl: feed.htmlUrl,
+      description: item.description.slice(0, 150),
     }));
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.warn(`[digest] ✗ ${feed.name}: ${msg.includes('abort') ? 'timeout' : msg}`);
+  } catch {
     return [];
   }
 }
 
-async function fetchAllFeeds(feeds: typeof RSS_FEEDS): Promise<Article[]> {
-  const allArticles: Article[] = [];
-  let successCount = 0, failCount = 0;
-  
-  for (let i = 0; i < feeds.length; i += FEED_CONCURRENCY) {
-    const batch = feeds.slice(i, i + FEED_CONCURRENCY);
-    const results = await Promise.allSettled(batch.map(fetchFeed));
-    
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value.length > 0) {
-        allArticles.push(...result.value);
-        successCount++;
-      } else {
-        failCount++;
-      }
-    }
-    console.log(`[digest] Progress: ${Math.min(i + FEED_CONCURRENCY, feeds.length)}/${feeds.length} (${successCount} ok, ${failCount} failed)`);
-  }
-  
-  console.log(`[digest] Fetched ${allArticles.length} articles from ${successCount} feeds`);
-  return allArticles;
-}
-
 // ============================================================================
-// AI Providers
+// Gemini API
 // ============================================================================
 
 async function callGemini(prompt: string, apiKey: string): Promise<string> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.3, topP: 0.8, topK: 40 },
-        }),
-      });
-      
-      if (response.status === 429 && attempt < 2) {
-        console.log(`[digest] Rate limited, retrying in ${60 * (attempt + 1)}s...`);
-        await new Promise(r => setTimeout(r, 60000 * (attempt + 1)));
-        continue;
-      }
-      
-      if (!response.ok) {
-        throw new Error(`Gemini API error (${response.status})`);
-      }
-      
-      const data = await response.json() as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      };
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } catch (error) {
-      if (attempt === 2) throw error;
-    }
-  }
-  return '';
-}
-
-async function callOpenAICompatible(
-  prompt: string, apiKey: string, apiBase: string, model: string
-): Promise<string> {
-  const normalizedBase = apiBase.replace(/\/+$/, '');
-  const response = await fetch(`${normalizedBase}/chat/completions`, {
+  const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], temperature: 0.3 }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.4, topP: 0.8 },
+    }),
   });
-
-  if (!response.ok) throw new Error(`OpenAI API error (${response.status})`);
-  
-  const data = await response.json() as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  return data.choices?.[0]?.message?.content || '';
-}
-
-function inferOpenAIModel(apiBase: string): string {
-  return apiBase.toLowerCase().includes('deepseek') ? 'deepseek-chat' : OPENAI_DEFAULT_MODEL;
-}
-
-function createAIClient(config: {
-  geminiApiKey?: string;
-  openaiApiKey?: string;
-  openaiApiBase?: string;
-  openaiModel?: string;
-}): AIClient {
-  const state = {
-    geminiApiKey: config.geminiApiKey?.trim() || '',
-    openaiApiKey: config.openaiApiKey?.trim() || '',
-    openaiApiBase: (config.openaiApiBase?.trim() || OPENAI_DEFAULT_API_BASE).replace(/\/+$/, ''),
-    openaiModel: config.openaiModel?.trim() || '',
-    geminiEnabled: Boolean(config.geminiApiKey?.trim()),
-  };
-
-  if (!state.openaiModel) state.openaiModel = inferOpenAIModel(state.openaiApiBase);
-
-  return {
-    async call(prompt: string): Promise<string> {
-      if (state.geminiEnabled && state.geminiApiKey) {
-        try {
-          return await callGemini(prompt, state.geminiApiKey);
-        } catch (error) {
-          if (state.openaiApiKey) {
-            console.warn(`[digest] Gemini failed, using fallback`);
-            return callOpenAICompatible(prompt, state.openaiApiKey, state.openaiApiBase, state.openaiModel);
-          }
-          throw error;
-        }
-      }
-      if (state.openaiApiKey) {
-        return callOpenAICompatible(prompt, state.openaiApiKey, state.openaiApiBase, state.openaiModel);
-      }
-      throw new Error('No API key configured');
-    },
-  };
-}
-
-function parseJsonResponse<T>(text: string): T {
-  let jsonText = text.trim();
-  if (jsonText.startsWith('```')) {
-    jsonText = jsonText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-  }
-  return JSON.parse(jsonText) as T;
+  if (!response.ok) throw new Error(`Gemini error: ${response.status}`);
+  const data = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 }
 
 // ============================================================================
-// AI Scoring
+// Main
 // ============================================================================
 
-function buildScoringPrompt(articles: Array<{ index: number; title: string; description: string; sourceName: string }>): string {
-  const articlesList = articles.map(a =>
-    `Index ${a.index}: [${a.sourceName}] ${a.title}\n${a.description.slice(0, 300)}`
-  ).join('\n\n---\n\n');
+async function main() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) { console.error('Missing GEMINI_API_KEY'); process.exit(1); }
 
-  return `You are a tech content curator. Score each article on three dimensions (1-10, 10=highest):
+  console.log(`📡 Fetching ${RSS_FEEDS.length} RSS feeds...`);
+  
+  const allArticles: Array<{ title: string; link: string; sourceName: string; description: string }> = [];
+  for (let i = 0; i < RSS_FEEDS.length; i += FEED_CONCURRENCY) {
+    const batch = RSS_FEEDS.slice(i, i + FEED_CONCURRENCY);
+    const results = await Promise.all(batch.map(fetchFeed));
+    for (const result of results) allArticles.push(...result);
+    console.log(`📡 Progress: ${Math.min(i + FEED_CONCURRENCY, RSS_FEEDS.length)}/${RSS_FEEDS.length}`);
+  }
+  
+  console.log(`✅ Fetched ${allArticles.length} articles`);
+  
+  // Take top 15 most recent (simple approach)
+  const topArticles = allArticles.slice(0, 15);
+  
+  const articlesList = topArticles.map((a, i) => 
+    `${i+1}. **${a.title}**\n   📍 Source: ${a.sourceName}\n   🔗 ${a.link}\n   📝 Preview: ${a.description}`
+  ).join('\n\n');
+  
+  const prompt = `You are a tech news summarizer. Here are today's top developer news with their source links.
 
-Relevance: value to developers/engineers
-Quality: depth, originality, insights
-Timeliness: how current/worth reading now
+${articlesList}
 
-Categories: ai-ml, security, engineering, tools, opinion, other
+Please format each article EXACTLY like this:
 
-Extract 2-4 keywords per article.
+**[Georgian Title]**
+📍 Source: [Original Source Name] 🔗 [Original Link]
+📝 Summary: [2-3 sentence summary in Georgian - about 50-80 words]
+💡 Hint: [1 sentence practical advice - how a developer can use this in everyday work]
 
-Return JSON only (no markdown):
-{
-  "results": [
-    {"index": 0, "relevance": 8, "quality": 7, "timeliness": 9, "category": "engineering", "keywords": ["Rust", "compiler"]}
-  ]
+Rules:
+- Translate title to Georgian
+- Keep source name and link as is
+- Summary: 2-3 sentences, focus on what problem it solves
+- Hint: Practical, actionable, beginner-friendly
+- Use ONLY Georgian language (except source name and link)
+
+At the end add a short overall Georgian summary.
+
+Example:
+**[GitHub-მა გამოუშვა Copilot-ის აგენტის რეჟიმი]**
+📍 Source: DEV.to 🔗 https://dev.to/...
+📝 Summary: GitHub-მა Copilot-ს დაამატა აგენტის რეჟიმი. AI-ს შეუძლია დამოუკიდებლად დაწეროს კოდი.
+💡 Hint: გამოიყენეთ რუტინული ფუნქციების ავტომატიზაციისთვის.`;
+
+  console.log('🤖 Generating Georgian digest...');
+  const output = await callGemini(prompt, apiKey);
+  
+  // Output to stdout (for Discord)
+  console.log('\n' + output);
+  
+  // Also save file for Discord workflow
+  await writeFile('digest-output.txt', output);
 }
 
-Articles:
-${articlesList}`;
-}
-
-async function scoreArticlesWithAI(
-  articles: Article[],
-  aiClient: AIClient
-): Promise<Map<number, { relevance: number; quality: number; timeliness: number; category: CategoryId; keywords: string[] }>> {
-  const allScores = new Map();
-  const indexed = articles.map((a, i) => ({ index: i, title: a.title, description: a.description, sourceName: a.sourceName }));
-  const batches: typeof indexed[] = [];
-  
-  for (let i = 0; i < indexed.length; i += GEMINI_BATCH_SIZE) {
-    batches.push(indexed.slice(i, i + GEMINI_BATCH_SIZE));
-  }
-  
-  console.log(`[digest] Scoring ${articles.length} articles in ${batches.length} batches`);
-  const validCategories = new Set(['ai-ml', 'security', 'engineering', 'tools', 'opinion', 'other']);
-  
-  for (let i = 0; i < batches.length; i += MAX_CONCURRENT_GEMINI) {
-    const batchGroup = batches.slice(i, i + MAX_CONCURRENT_GEMINI);
-    await Promise.all(batchGroup.map(async (batch) => {
-      try {
-        const parsed = parseJsonResponse<GeminiScoringResult>(await aiClient.call(buildScoringPrompt(batch)));
-        for (const result of parsed.results) {
-          allScores.set(result.index, {
-            relevance: Math.min(10, Math.max(1, Math.round(result.relevance))),
-            quality: Math.min(10, Math.max(1, Math.round(result.quality))),
-            timeliness: Math.min(10, Math.max(1, Math.round(result.timeliness))),
-            category: validCategories.has(result.category) ? result.category : 'other',
-            keywords: result.keywords?.slice(0, 4) || [],
-          });
-        }
-      } catch (error) {
-        for (const item of batch) {
-          allScores.set(item.index, { relevance: 5, quality: 5, timeliness: 5, category: 'other', keywords: [] });
-        }
-      }
-    }));
-  }
-  return allScores;
-}
-
-// ============================================================================
-// AI Summarization
-// ============================================================================
-
-function buildSummaryPrompt(
-  articles: Array<{ index: number; title: string; description: string; sourceName: string; link: string }>,
-  lang: string
-): string {
-  const articlesList = articles.map(a =>
-    `Index ${a.index}: [${a.sourceName}] ${a.title}\nURL: ${a.link}\n${a.description.slice(0, 800)}`
-  ).join('\n\n---\n\n');
-
-  const langInstruction = lang === 'ka'
-    ? 'Write summaries, reasons, and title translations in Georgian. If original is English, translate to Georgian.'
-    : 'Write summaries, reasons, and title translations in English.';
-
-  return `You are a tech content summarizer. For each article, provide:
-
-1. titleTranslated: Translated title (${lang === 'ka' ? 'Georgian' : 'English'})
-2. summary: 4-6 sentence structured summary covering: core problem, key points/approach, conclusion
-3. reason: One sentence explaining why worth reading
-
-${langInstruction}
-
-Return JSON only:
-{
-  "results": [
-    {"index": 0, "titleTranslated": "Title", "summary": "Summary text...", "reason": "Why worth reading..."}
-  ]
-}
-
-Articles:
-${articlesList}`;
-}
-
-async function summarizeArticles(
-  articles: Array<Article & { index: number }>,
-  aiClient: AIClient,
-  lang: string
-): Promise<Map<number, { titleTranslated: string; summary: string; reason: string }>> {
-  const summaries = new Map();
-  const indexed = articles.map(a => ({ index: a.index, title: a.title, description: a.description, sourceName: a.sourceName, link: a.link }));
-  const batches: typeof indexed[] = [];
-  
-  for (let i = 0; i < indexed.length; i += GEMINI_BATCH_SIZE) {
-    batches.push(indexed.slice(i, i + GEMINI_BATCH_SIZE));
-  }
-  
-  console.log(`[digest] Summarizing ${articles.length} articles in ${batches.length} batches`);
-  
-  for (let i = 0; i < batches.length; i += MAX_CONCURRENT_GEMINI) {
-    const batchGroup = batches.slice(i, i + MAX_CONCURRENT_GEMINI);
-    await Promise.all(batchGroup.map(async (batch) => {
-      try {
-        const parsed = parseJsonResponse<GeminiSummaryResult>(await aiClient.call(buildSummaryPrompt(batch, lang)));
-        for (const result of parsed.results) {
-          summaries.set(result.index, {
-            titleTranslated: result.titleTranslated || batch.find(b => b.index === result.index)?.title || '',
-            summary: result.summary || '',
-            reason: result.reason || '',
-          });
-        }
-      } catch (error) {
-        for (const item of batch) {
-          summaries.set(item.index, { titleTranslated: item.title, summary: item.title, reason: '' });
-        }
-      }
-    }));
-  }
-  return summaries;
-}
-
-// ============================================================================
-// AI Highlights
-// ============================================================================
-
-async function generateHighlights(articles: ScoredArticle[], aiClient: AIClient, lang: string): Promise<string> {
-  const articleList = articles.slice(0, 10).map((a, i) =>
-    `${i + 1}. [${a.category}] ${a.titleTranslated || a.title} — ${a.summary.slice(0, 100)}`
-  ).join('\n');
-
-  const langNote = lang === 'ka' ? 'Respond in Georgian.' : 'Respond in English.';
-
-  const prompt = `Based on these tech articles, write a 3-5 sentence "Today's Highlights" summary identifying 2-3 main trends. Be concise and macro-level.
-
-${langNote}
-
-Articles:
-${articleList}
-
-Return plain text only.`;
-
-  try {
-    return (await aiClient.call(prompt)).trim();
-  } catch {
-    return '';
-  }
-}
-
-// ============================================================================
-// Visualization Helpers
-// ============================================================================
-
-function humanizeTime(pubDate: Date): string {
-  const diffHours = Math.floor((Date.now() - pubDate.getTime()) / 3_600_000);
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffHours < 1) return 'just now';
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return pubDate.toISOString().slice(0, 10);
-}
-
-function generateAsciiBarChart(articles: ScoredArticle[]): string {
-  const kwCount = new Map<string, number>();
-  for (const a of articles) {
-    for (const kw of a.keywords) {
-      kwCount.set(kw.toLowerCase(), (kwCount.get(kw.toLowerCase()) || 0) + 1);
-    }
-  }
-  const sorted = Array.from(kwCount.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  if (sorted.length === 0) return '';
-  
-  const maxVal = sorted[0][1];
-  const maxBarWidth = 20;
-  const maxLabelLen = Math.max(...sorted.map(([k]) => k.length));
-  let chart = '```\n';
-  for (const [label, value] of sorted) {
-    const barLen = Math.max(1, Math.round((value / maxVal) * maxBarWidth));
-    chart += `${label.padEnd(maxLabelLen)} │ ${'█'.repeat(barLen)}${'░'.repeat(maxBarWidth - barLen)} ${value}\n`;
-  }
-  chart += '```\n';
-  return chart;
-}
-
-function generateTagCloud(articles: ScoredArticle[]): string {
-  const kwCount = new Map<string, number>();
-  for (const a of articles) {
-    for (const kw of a.keywords) {
-      kwCount.set(kw.toLowerCase(), (kwCount.get(kw.toLowerCase()) || 0) + 1);
-    }
-  }
-  const sorted = Array.from(kwCount.entries()).sort((a, b) => b[1] - a[1]).slice(0, 20);
-  return sorted.map(([word, count], i) => i < 3 ? `**${word}**(${count})` : `${word}(${count})`).join(' · ');
-}
-
-// ============================================================================
-// Report Generation
-// ============================================================================
-
-function generateDigestReport(articles: ScoredArticle[], highlights: string, stats: {
-  totalFeeds: number;
-  successFeeds: number;
-  totalArticles: number;
-  filteredArticles: number;
-  hours: number;
-}): string {
-  const now = new Date();
-  const dateStr = now.toISOString().split('T')[0];
-  
-  let report = `# 📰 AI Daily Digest — ${dateStr}\n\n`;
-  report += `> ${stats.totalFeeds} tech blogs, AI selected Top ${articles.length}\n\n`;
-
-  if (highlights) {
-    report += `## 📝 Today's Highlights\n\n${highlights}\n\n---\n\n`;
-  }
-
-  if (articles.length >= 3) {
-    report += `## 🏆 Top 3 Picks\n\n`;
-    for (let i = 0; i < Math.min(3, articles.length); i++) {
-      const a = articles[i];
-      const medal = ['🥇', '🥈', '🥉'][i];
-      const catMeta = CATEGORY_META[a.category];
-      report += `${medal} **${a.titleTranslated || a.title}**\n\n`;
-      report += `[${a.title}](${a.link}) — ${a.sourceName} · ${humanizeTime(a.pubDate)} · ${catMeta.emoji} ${catMeta.label}\n\n`;
-      report += `> ${a.summary}\n\n`;
-      if (a.reason) report += `💡 **Why read**: ${a.reason}\n\n`;
-      if (a.keywords.length) report += `🏷️ ${a.keywords.join(', ')}\n\n`;
-    }
-    report += `---\n\n`;
-  }
-
-  report += `## 📊 Overview\n\n`;
-  report += `| Feeds | Articles | Time | Selected |\n`;
-  report += `|:---:|:---:|:---:|:---:|\n`;
-  report += `| ${stats.successFeeds}/${stats.totalFeeds} | ${stats.totalArticles} → ${stats.filteredArticles} | ${stats.hours}h | **${articles.length}** |\n\n`;
-
-  const asciiChart = generateAsciiBarChart(articles);
-  if (asciiChart) report += `### Top Keywords\n\n${asciiChart}\n\n`;
-  
-  const tagCloud = generateTagCloud(articles);
-  if (tagCloud) report += `### 🏷️ Topics\n\n${tagCloud}\n\n---\n\n`;
-
-  const categoryGroups = new Map<CategoryId, ScoredArticle[]>();
-  for (const a of articles) {
-    const list = categoryGroups.get(a.category) || [];
-    list.push(a);
-    categoryGroups.set(a.category, list);
-  }
-
-  let globalIndex = 0;
-  for (const [catId, catArticles] of Array.from(categoryGroups.entries()).sort((a, b) => b[1].length - a[1].length)) {
-    const catMeta = CATEGORY_META[catId];
-    report += `## ${catMeta.emoji} ${catMeta.label}\n\n`;
-    for (const a of catArticles) {
-      globalIndex++;
-      const scoreTotal = a.scoreBreakdown.relevance + a.scoreBreakdown.quality + a.scoreBreakdown.timeliness;
-      report += `### ${globalIndex}. ${a.titleTranslated || a.title}\n\n`;
-      report += `[${a.title}](${a.link}) — **${a.sourceName}** · ${humanizeTime(a.pubDate)} · ⭐ ${scoreTotal}/30\n\n`;
-      report += `> ${a.summary}\n\n`;
-      if (a.keywords.length) report += `🏷️ ${a.keywords.join(', ')}\n\n`;
-      report += `---\n\n`;
-    }
-  }
-
-  report += `\n*Generated: ${dateStr} | ${stats.successFeeds} sources → ${stats.totalArticles} articles → ${stats.filteredArticles} recent → ${articles.length} selected*\n`;
-  return report;
-}
-
-// ============================================================================
-// CLI & Main
-// ============================================================================
-
-function printUsage(): void {
-  console.log(`AI Daily Digest - AI-powered RSS digest from 92 top tech blogs
-
-Usage:
-  bun scripts/digest.ts [options]
-
-Options:
-  --hours <n>     Time range in hours (default: 24)
-  --top-n <n>     Number of articles (default: 15)
-  --lang <lang>   Language: en or ka (default: en)
-  --output <path> Output file path
-  --help          Show help
-
-Environment:
-  GEMINI_API_KEY   Get at https://aistudio.google.com/apikey
-  OPENAI_API_KEY   Optional fallback
-
-Examples:
-  bun scripts/digest.ts --hours 24 --top-n 15 --lang ka
-`);
-  process.exit(0);
-}
-
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  if (args.includes('--help') || args.includes('-h')) printUsage();
-  
-  let hours = 24;
-  let topN = 15;
-  let lang: 'en' | 'ka' = 'en';
-  let outputPath = '';
-  
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === '--hours' && args[i + 1]) hours = parseInt(args[++i]!, 10);
-    else if (arg === '--top-n' && args[i + 1]) topN = parseInt(args[++i]!, 10);
-    else if (arg === '--lang' && args[i + 1]) lang = args[++i] as 'en' | 'ka';
-    else if (arg === '--output' && args[i + 1]) outputPath = args[++i]!;
-  }
-  
-  const geminiApiKey = process.env.GEMINI_API_KEY;
-  if (!geminiApiKey) {
-    console.error('[digest] Error: GEMINI_API_KEY not set');
-    process.exit(1);
-  }
-  
-  if (!outputPath) outputPath = `./digest-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.md`;
-  
-  console.log(`[digest] === AI Daily Digest ===`);
-  console.log(`[digest] Hours: ${hours}, Top N: ${topN}, Language: ${lang}`);
-  
-  const aiClient = createAIClient({ geminiApiKey });
-  
-  console.log(`[digest] Fetching ${RSS_FEEDS.length} RSS feeds...`);
-  const allArticles = await fetchAllFeeds(RSS_FEEDS);
-  if (allArticles.length === 0) { console.error('[digest] No articles fetched'); process.exit(1); }
-  
-  const cutoffTime = new Date(Date.now() - hours * 60 * 60 * 1000);
-  const recentArticles = allArticles.filter(a => a.pubDate.getTime() > cutoffTime.getTime());
-  console.log(`[digest] Found ${recentArticles.length} articles from last ${hours}h`);
-  if (recentArticles.length === 0) { console.error(`[digest] No articles in last ${hours}h`); process.exit(1); }
-  
-  console.log(`[digest] AI scoring...`);
-  const scores = await scoreArticlesWithAI(recentArticles, aiClient);
-  
-  const scored = recentArticles.map((a, i) => {
-    const s = scores.get(i) || { relevance: 5, quality: 5, timeliness: 5, category: 'other' as CategoryId, keywords: [] };
-    return { ...a, score: s.relevance + s.quality + s.timeliness, breakdown: s };
-  }).sort((a, b) => b.score - a.score).slice(0, topN);
-  
-  console.log(`[digest] Top ${topN} selected`);
-  
-  const indexedTop = scored.map((a, i) => ({ ...a, index: i }));
-  const summaries = await summarizeArticles(indexedTop, aiClient, lang);
-  
-  const finalArticles: ScoredArticle[] = scored.map((a, i) => {
-    const sm = summaries.get(i) || { titleTranslated: a.title, summary: a.description.slice(0, 200), reason: '' };
-    return {
-      ...a,
-      score: a.score,
-      scoreBreakdown: a.breakdown,
-      category: a.breakdown.category,
-      keywords: a.breakdown.keywords,
-      titleTranslated: sm.titleTranslated,
-      summary: sm.summary,
-      reason: sm.reason,
-    };
-  });
-  
-  console.log(`[digest] Generating highlights...`);
-  const highlights = await generateHighlights(finalArticles, aiClient, lang);
-  
-  const report = generateDigestReport(finalArticles, highlights, {
-    totalFeeds: RSS_FEEDS.length,
-    successFeeds: new Set(allArticles.map(a => a.sourceName)).size,
-    totalArticles: allArticles.length,
-    filteredArticles: recentArticles.length,
-    hours,
-  });
-  
-  await mkdir(dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, report);
-  console.log(`[digest] ✅ Done! Report: ${outputPath}`);
-}
-
-await main().catch(err => { console.error(`[digest] Fatal: ${err.message}`); process.exit(1); });
+await main().catch(console.error);
