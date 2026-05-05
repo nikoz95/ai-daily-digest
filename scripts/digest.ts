@@ -118,11 +118,11 @@ type CategoryId = 'ai-ml' | 'security' | 'engineering' | 'tools' | 'opinion' | '
 
 const CATEGORY_META: Record<CategoryId, { emoji: string; label: string }> = {
   'ai-ml':       { emoji: '🤖', label: 'AI / ML' },
-  'security':    { emoji: '🔒', label: '安全' },
-  'engineering': { emoji: '⚙️', label: '工程' },
-  'tools':       { emoji: '🛠', label: '工具 / 开源' },
-  'opinion':     { emoji: '💡', label: '观点 / 杂谈' },
-  'other':       { emoji: '📝', label: '其他' },
+  'security':    { emoji: '🔒', label: 'უსაფრთხოება' },
+  'engineering': { emoji: '⚙️', label: 'ინჟინერია' },
+  'tools':       { emoji: '🛠', label: 'ინსტრუმენტები' },
+  'opinion':     { emoji: '💡', label: 'მოსაზრებები' },
+  'other':       { emoji: '📝', label: 'სხვა' },
 };
 
 interface Article {
@@ -634,8 +634,11 @@ function buildSummaryPrompt(
     `Index ${a.index}: [${a.sourceName}] ${a.title}\nURL: ${a.link}\n${a.description.slice(0, 800)}`
   ).join('\n\n---\n\n');
 
-  const langInstruction = lang === 'ka'
-    ? '请用中文撰写摘要和推荐理由。如果原文是英文，请翻译为中文。标题翻译也用中文。'
+  function buildSummaryPrompt(..., lang: 'zh' | 'en' | 'ka'): string {
+  const langInstruction = lang === 'zh'
+    ? '请用中文撰写摘要...'
+    : lang === 'ka'
+    ? 'დაწერეთ შეჯამება, მიზეზი და სათაური ქართულად. თუ ორიგინალი ინგლისურია, თარგმნეთ ქართულად.'
     : 'Write summaries, reasons, and title translations in English.';
 
   return `你是一个技术内容摘要专家。请为以下文章完成三件事：
@@ -740,7 +743,11 @@ async function generateHighlights(
     `${i + 1}. [${a.category}] ${a.titleZh || a.title} — ${a.summary.slice(0, 100)}`
   ).join('\n');
 
-  const langNote = lang === 'ka' ? 'ჩაწერე。' : 'Write in English.';
+  const langNote = lang === 'zh' 
+  ? '用中文回答。' 
+  : lang === 'ka' 
+  ? 'უპასუხე ქართულად.' 
+  : 'Write in English.';
 
   const prompt = `根据以下今日精选技术文章列表，写一段 3-5 句话的"今日看点"总结。
 要求：
