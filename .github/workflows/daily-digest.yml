@@ -13,7 +13,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm install
-      - run: node index.js
+      - name: Generate digest
+        run: |
+          npm install -g alif-digest
+          alif init
+          alif run
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
