@@ -13,14 +13,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Install alif-digest
-        run: npm install -g alif-digest
-      - name: Run alif init (non‑interactive)
-        run: |
-          alif init --provider openai --non-interactive
+      - name: Install dependencies
+        run: npm install @google/generative-ai
+      - name: Run digest
+        run: node digest.js
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      - name: Generate digest
-        run: alif run
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
