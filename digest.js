@@ -29,6 +29,9 @@ async function getNews() {
   console.log('📰 დღევანდელი დეველოპერული სიახლეები:');
   console.log('=========================================');
   console.log(result.response.text());
+
+  const fs = require('fs');
+  fs.writeFileSync('digest-output.txt', output);
 }
 
 getNews().catch(console.error);
