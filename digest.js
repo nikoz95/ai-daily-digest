@@ -13,7 +13,7 @@ async function getNews() {
     "Claude 4 adds computer use API for automation"
   ];
   
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
   
   const prompt = `Translate these tech news headlines to Georgian and summarize them in Georgian:
   
