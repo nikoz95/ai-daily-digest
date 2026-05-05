@@ -13,16 +13,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      
       - name: Install dependencies
         run: npm install @google/generative-ai
+      
       - name: Run digest
         run: node digest.js
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      - name: Create Issue
+      
+      - name: Create GitHub Issue
         uses: actions/github-script@v7
         with:
           script: |
@@ -34,3 +38,26 @@ jobs:
               title: `📰 AI სიახლეები - ${new Date().toLocaleDateString('ka-GE')}`,
               body: content
             });
+      
+      - name: Send to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "Discord webhook not configured, skipping"
+            exit 0
+          fi
+          
+          CONTENT=$(cat digest-output.txt | head -c 1900)
+          ESCAPED=$(echo "$CONTENT" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+          
+          curl -X POST -H "Content-Type: application/json" \
+            -d "{
+              \"content\": \"📰 **AI ყოველდღიური სიახლეები**\",
+              \"embeds\": [{
+                \"title\": \"$(date +'%Y-%m-%d')\",
+                \"description\": \"$ESCAPED\",
+                \"color\": 5814783,
+                \"footer\": {\"text\": \"AI Daily Digest\"}
+              }]
+            }" "$DISCORD_WEBHOOK_URL"
