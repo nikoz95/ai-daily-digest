@@ -22,15 +22,31 @@ jobs:
         run: npm install @google/generative-ai
       
       - name: Run digest
-        run: node digest.js
+        run: node digest.cjs
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      
+      - name: Check if output exists
+        run: |
+          if [ -f digest-output.txt ]; then
+            echo "✅ digest-output.txt exists"
+            echo "First 5 lines:"
+            head -5 digest-output.txt
+          else
+            echo "❌ digest-output.txt NOT found"
+            ls -la
+            exit 1
+          fi
       
       - name: Create GitHub Issue
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
+            if (!fs.existsSync('digest-output.txt')) {
+              console.log('No digest-output.txt found');
+              return;
+            }
             const content = fs.readFileSync('digest-output.txt', 'utf8');
             await github.rest.issues.create({
               owner: context.repo.owner,
@@ -45,6 +61,11 @@ jobs:
         run: |
           if [ -z "$DISCORD_WEBHOOK_URL" ]; then
             echo "Discord webhook not configured, skipping"
+            exit 0
+          fi
+          
+          if [ ! -f digest-output.txt ]; then
+            echo "digest-output.txt not found, skipping Discord"
             exit 0
           fi
           
