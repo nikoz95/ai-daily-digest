@@ -77,6 +77,21 @@ jobs:
               body: content
             });
 
+      - name: Send to Discord
+        run: |
+          CONTENT=$(cat ./output/digest.md | head -c 1900)
+          CONTENT_ESCAPED=$(echo "$CONTENT" | jq -Rs .)
+          curl -X POST -H "Content-Type: application/json" \
+            -d '{
+              "content": "📰 **AI ყოველდღიური სიახლეები**",
+              "embeds": [{
+                "title": "დღევანდელი ტოპ სიახლეები",
+                "description": '"$CONTENT_ESCAPED"',
+                "color": 5814783,
+                "footer": {"text": "AI Daily Digest"}
+              }]
+            }' ${{ secrets.DISCORD_WEBHOOK_URL }}
+
       - name: Upload as artifact
         uses: actions/upload-artifact@v4
         with:
