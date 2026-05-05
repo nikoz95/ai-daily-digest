@@ -1,11 +1,7 @@
 {
   "name": "ai-daily-digest",
   "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "digest": "bun scripts/digest.ts"
-  },
-  "devDependencies": {
-    "@types/bun": "latest"
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0"
   }
 }
