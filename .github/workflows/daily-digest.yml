@@ -13,10 +13,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Generate digest
+      - name: Install alif-digest
+        run: npm install -g alif-digest
+      - name: Run alif init (non‑interactive)
         run: |
-          npm install -g alif-digest
-          alif init
-          alif run
+          alif init --provider openai --non-interactive
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - name: Generate digest
+        run: alif run
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
