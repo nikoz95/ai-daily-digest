@@ -1,11 +1,10 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const fs = require('fs');
 
-const apiKey = process.env.GEMINI_API_KEY;
-const genAI = new GoogleGenerativeAI(apiKey);
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 async function getNews() {
-  // ტესტური სიახლეები - მოგვიანებით შეგიძლიათ RSS-ით ჩაანაცვლოთ
-  const newsItems = [
+  const news = [
     "GitHub Copilot launches new agent mode for autonomous coding",
     "Google releases Gemini 2.5 Pro with 1M token context",
     "OpenAI introduces GPT-5 with reasoning capabilities",
@@ -17,20 +16,22 @@ async function getNews() {
   
   const prompt = `Translate these tech news headlines to Georgian and summarize them in Georgian:
   
-  ${newsItems.join('\n')}
+  ${news.join('\n')}
   
   Respond in Georgian language only. Format: 
-  1. სათაური ქართულად - მოკლე შეჯამება (2-3 სიტყვა)
+  1. სათაური ქართულად - მოკლე შეჯამება
   2. ...
   
-  Also add a short overall summary at the end.`;
+  Add a short overall summary at the end.`;
   
   const result = await model.generateContent(prompt);
+  const output = result.response.text();
+  
   console.log('📰 დღევანდელი დეველოპერული სიახლეები:');
   console.log('=========================================');
-  console.log(result.response.text());
-
-  const fs = require('fs');
+  console.log(output);
+  
+  // ფაილში შენახვა Issue-სთვის
   fs.writeFileSync('digest-output.txt', output);
 }
 
