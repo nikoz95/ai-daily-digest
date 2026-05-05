@@ -5,56 +5,33 @@ on:
   schedule:
     - cron: '0 6 * * *'
 
-permissions:
-  issues: write
-
 jobs:
   digest:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Setup Bun (for TypeScript)
+      - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
       
-      - name: Run TypeScript digest
-        run: bun scripts/digest.ts --lang ka --output digest-output.txt
+      - name: Generate and send to Discord
+        run: |
+          OUTPUT=$(bun scripts/digest.ts --lang ka --output /dev/stdout 2>&1)
+          
+          # Format for Discord
+          ESCAPED=$(echo "$OUTPUT" | head -c 1900 | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+          
+          curl -X POST -H "Content-Type: application/json" \
+            -d "{
+              \"content\": \"📰 **AI ყოველდღიური სიახლეები**\",
+              \"embeds\": [{
+                \"title\": \"$(date +'%Y-%m-%d')\",
+                \"description\": \"$ESCAPED\",
+                \"color\": 5814783,
+                \"footer\": {\"text\": \"AI Daily Digest\"}
+              }]
+            }" "${{ secrets.DISCORD_WEBHOOK_URL }}"
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      
-      - name: Check output
-        run: |
-          if [ -f digest-output.txt ]; then
-            echo "✅ File created, size: $(wc -c < digest-output.txt) bytes"
-            head -3 digest-output.txt
-          else
-            echo "❌ No output file"
-            ls -la
-            exit 1
-          fi
-      
-      - name: Create GitHub Issue
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const content = fs.readFileSync('digest-output.txt', 'utf8');
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `📰 AI სიახლეები - ${new Date().toLocaleDateString('ka-GE')}`,
-              body: content
-            });
-      
-      - name: Send to Discord
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          if [ -n "$DISCORD_WEBHOOK_URL" ] && [ -f digest-output.txt ]; then
-            CONTENT=$(head -c 1900 digest-output.txt | sed 's/"/\\"/g' | awk '{printf "%s\\n", $0}')
-            curl -X POST -H "Content-Type: application/json" \
-              -d "{\"content\": \"📰 **AI ყოველდღიური სიახლეები**\", \"embeds\": [{\"title\": \"$(date +'%Y-%m-%d')\", \"description\": \"$CONTENT\", \"color\": 5814783}]}" \
-              "$DISCORD_WEBHOOK_URL"
-          fi
