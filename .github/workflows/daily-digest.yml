@@ -22,7 +22,7 @@ jobs:
         run: npm install @google/generative-ai
       
       - name: Run digest
-        run: node digest.cj
+        run: node digest.js
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       
